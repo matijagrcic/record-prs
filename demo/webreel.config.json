@@ -205,6 +205,143 @@
           "selector": "[data-testid='signed-pdf-exported']"
         }
       ]
+    },
+    "recording_reviews": {
+      "url": "/#/recordings",
+      "waitFor": "[data-testid='recordings-page']",
+      "steps": [
+        {
+          "action": "screenshot",
+          "output": ".record-prs/review-library.png"
+        },
+        {
+          "action": "key",
+          "key": "Home",
+          "target": "[data-testid='recordings-search']"
+        },
+        {
+          "action": "type",
+          "text": "LATEST WORKSPACE"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-count'][data-count='1']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recording-overview'][data-reviewed='false']"
+        },
+        {
+          "action": "screenshot",
+          "output": ".record-prs/review-search.png"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid='review-overview']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recording-overview'][data-reviewed='true']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-reviewed'][data-count='3']"
+        },
+        {
+          "action": "screenshot",
+          "output": ".record-prs/review-complete.png"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid='nav-overview']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='overview-page']"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid='nav-recordings']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recording-overview'][data-reviewed='true']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-count'][data-count='3']"
+        },
+        {
+          "action": "key",
+          "key": "Home",
+          "target": "[data-testid='recordings-search']"
+        },
+        {
+          "action": "type",
+          "text": "Project overview"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid='filter-reviewed']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-count'][data-count='1']"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid='review-overview']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-empty']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-reviewed'][data-count='2']"
+        },
+        {
+          "action": "screenshot",
+          "output": ".record-prs/review-filter-empty.png"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid='clear-recording-filters']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-count'][data-count='3']"
+        },
+        {
+          "action": "key",
+          "key": "Home",
+          "target": "[data-testid='recordings-search']"
+        },
+        {
+          "action": "type",
+          "text": "No matching journey"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-empty']"
+        },
+        {
+          "action": "screenshot",
+          "output": ".record-prs/review-search-empty.png"
+        },
+        {
+          "action": "click",
+          "text": "Show all recordings"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recordings-count'][data-count='3']"
+        },
+        {
+          "action": "wait",
+          "selector": "[data-testid='recording-overview'][data-reviewed='false']"
+        }
+      ]
     }
   }
 }
