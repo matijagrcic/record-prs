@@ -5,6 +5,9 @@ branding:
   icon: video
   color: purple
 inputs:
+  capture-engine:
+    description: 'Video capture engine: webreel or chrome-capture (Node 24.11+ and full Chrome 153+ required).'
+    default: webreel
   install-command:
     description: Frozen dependency installation command, run inside working-directory.
     default: npm ci
@@ -58,13 +61,14 @@ runs:
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_JOURNEY_MAP: ${{ inputs.journey-map }}
         INPUT_READY_TIMEOUT: ${{ inputs.ready-timeout }}
+        INPUT_CAPTURE_ENGINE: ${{ inputs.capture-engine }}
         ACTION_DIRECTORY: ${{ github.action_path }}
       run: |
         export FFMPEG_PATH="$(command -v ffmpeg)"
         node "$ACTION_DIRECTORY/dist/capture.mjs"
     - name: Upload direct MP4 and PNG artifacts
       if: always() && !cancelled()
-      uses: matijagrcic/record-prs/upload@v1.1.0
+      uses: matijagrcic/record-prs/upload@v1.2.0
       with:
         media-directory: ${{ steps.capture.outputs.media-directory }}
         retention-days: ${{ inputs.retention-days }}

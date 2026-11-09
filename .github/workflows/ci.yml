@@ -21,5 +21,11 @@ jobs:
       - run: npm ci
       - run: npm test && npm run check && npm run build
       - run: git diff --exit-code -- dist
+      - name: Smoke-test native Chrome recording and H.264 publishing format
+        run: node --test test/native-integration.test.mjs
+        env:
+          CHROME_CAPTURE_SMOKE: '1'
+          CHROME_PATH: /usr/bin/google-chrome
+          FFMPEG_PATH: ffmpeg
       - run: bun install --frozen-lockfile && bun run build
         working-directory: demo

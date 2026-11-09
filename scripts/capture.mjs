@@ -5,6 +5,8 @@ import * as core from '@actions/core';
 import { identity, prefix, selectJourneys } from './lib.mjs';
 import { patchChromeSource } from './webreel-compat.mjs';
 import { expandJourneySteps, selectPullRequestJourneys } from './journeys.mjs';
+import { captureEngine, installNativeEngine } from './capture-engine.mjs';
+import { fileURLToPath } from 'node:url';
 
 const get = (name, fallback = '') => process.env[`INPUT_${name.toUpperCase().replaceAll('-', '_')}`] || fallback;
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
@@ -33,6 +35,7 @@ const shell = text => command('bash', ['-eo', 'pipefail', '-c', text]);
 let server;
 let log;
 try {
+  const engine = captureEngine(get('capture-engine', 'webreel'));
   const configPath = path.resolve(root, get('config', 'webreel.config.json'));
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   if (!config.videos || typeof config.videos !== 'object' || Array.isArray(config.videos)) throw new Error('Webreel config must define a videos object.');
@@ -55,9 +58,17 @@ try {
   } else {
     if (selected.length > 8) throw new Error('At most 8 journeys can be recorded per run.');
     await shell(get('install-command', 'npm ci'));
-    const toolDir = path.join(process.env.RUNNER_TEMP || out, 'record-prs-webreel-0.1.4');
-    await command('npm', ['install', '--prefix', toolDir, '--no-audit', '--no-fund', 'webreel@0.1.4'], workspace);
-    if (process.platform === 'linux') {
+    const native = engine === 'chrome-capture';
+    if (native) {
+      const [major, minor] = process.versions.node.split('.').map(Number);
+      if (major < 24 || (major === 24 && minor < 11)) throw new Error('chrome-capture requires Node 24.11+.');
+    }
+    const toolDir = path.join(process.env.RUNNER_TEMP || out, `record-prs-webreel-0.1.4${native ? '-chrome-capture-0.1.2' : ''}`);
+    await command('npm', ['install', '--prefix', toolDir, '--no-audit', '--no-fund', 'webreel@0.1.4', ...(native ? ['chrome-capture@0.1.2'] : [])], workspace);
+    if (native) {
+      installNativeEngine(toolDir, fileURLToPath(new URL('./native-recorder.mjs', import.meta.url)));
+      core.info('Recording with chrome-capture 0.1.2 and Webreel overlays (Chrome 153+ required).');
+    } else if (process.platform === 'linux') {
       const chromeSource = path.join(toolDir, 'node_modules', '@webreel', 'core', 'dist', 'chrome.js');
       fs.writeFileSync(chromeSource, patchChromeSource(fs.readFileSync(chromeSource, 'utf8')));
       core.info('Applied the Webreel 0.1.4 Linux frame-control compatibility fix.');

@@ -26,7 +26,7 @@ feature's interactions from arbitrary source-code changes.
 jobs:
   record:
     if: '!github.event.pull_request.draft'
-    uses: matijagrcic/record-prs/.github/workflows/capture.yml@v1.1.0
+    uses: matijagrcic/record-prs/.github/workflows/capture.yml@v1.2.0
     with:
       install-command: npm ci
       start-command: npm run dev -- --host 127.0.0.1
@@ -36,7 +36,7 @@ jobs:
 That is the whole capture job. The reusable workflow sets up Node 24 and Bun,
 checks out the exact PR head with read-only permissions, starts the application,
 runs the matching journeys, and uploads each video/screenshot directly without
-a ZIP wrapper. The action also works as `uses: matijagrcic/record-prs@v1.1.0` inside
+a ZIP wrapper. The action also works as `uses: matijagrcic/record-prs@v1.2.0` inside
 your own job; set up Node 24 and check out the PR first.
 
 For Bun use `install-command: bun install --frozen-lockfile`. For pnpm, enable
@@ -115,7 +115,7 @@ Artifacts require GitHub sign-in and expire after 14 days by default.
 8. Use the example publisher workflow, which already passes the secret:
 
 ```yaml
-- uses: matijagrcic/record-prs/publish@v1.1.0
+- uses: matijagrcic/record-prs/publish@v1.2.0
   with:
     github-token: ${{ github.token }}
     media-token: ${{ secrets.PR_MEDIA_TOKEN }}
@@ -177,6 +177,7 @@ labels does not trigger another recording.
 
 | Capture input | Default | Meaning |
 | --- | --- | --- |
+| `capture-engine` | `webreel` | `webreel` or opt-in `chrome-capture` |
 | `working-directory` | `.` | App path in the caller's checkout |
 | `install-command` | `npm ci` | Dependency installation command |
 | `start-command` | `npm run dev -- --host 127.0.0.1` | App command, or empty for an existing preview |
@@ -188,6 +189,51 @@ labels does not trigger another recording.
 
 The reusable workflow also accepts `node-version` (24+) and `bun-version`.
 Use the composite action if you need custom tooling or `ready-timeout`.
+
+### Native Chrome capture
+
+Version `v1.2.0` adds `capture-engine: chrome-capture` to the composite action and
+reusable capture workflow. Webreel remains the default engine.
+
+```yaml
+- uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+  with:
+    node-version: '24' # 24.11+ for chrome-capture
+# Check out the PR and set up the application's package manager before this step.
+- uses: matijagrcic/record-prs@v1.2.0
+  with:
+    capture-engine: chrome-capture
+    install-command: npm ci
+    start-command: npm run dev -- --host 127.0.0.1
+    base-url: http://127.0.0.1:3000
+```
+
+The integration pins [chrome-capture](https://github.com/paulirish/chrome-capture)
+to `0.1.2` and requires Node **24.11+** and a full **Chrome 153+** installation.
+Set `CHROME_PATH` in the capture step's environment for a specific Chrome binary.
+The engine checks Chrome's version and fails with an actionable error when it is
+too old. Headless capture supports **1–60 fps**, with 60 as the default.
+
+Chrome records AV1 directly from the compositor. Webreel still runs the configured
+journey, captures PNG milestones, and composites the cursor, keystroke HUD, and
+configured sound effects. The final artifact remains an H.264 MP4 for PR playback.
+Native capture uses a wall-clock interaction timeline; its compositor filter
+matches variable-rate frames to that timeline and preserves the final static hold.
+Tab audio is disabled in this integration. FFmpeg remains required for compositing.
+
+Keep `webreel` as the default while evaluating native capture. A local comparison
+of the demo's navigation journey on Chrome 156 at 1440×900 produced:
+
+| Engine | Complete recording time | Final MP4 size |
+| --- | --- | --- |
+| Webreel 0.1.4 | 24.9 seconds | 681 KB |
+| chrome-capture 0.1.2 + Webreel overlays | 22.9 seconds | 979 KB |
+
+These are single local runs with randomized Webreel cursor movements, excluding
+dependency installation. Both outputs were H.264 at 60 fps. Native capture removes
+the per-frame JPEG capture/transport stage; total runtime still includes the
+journey and offline overlay rendering. The upstream benchmarks compare different
+pipelines, so evaluate complete PR captures on your runner before switching defaults.
 
 The publisher takes `github-token`, optional `media-token`, and `proof-labels`.
 It downloads at most 32 media files, each at most 10 MiB, validates SHA256
@@ -244,6 +290,16 @@ npm test
 npm run check
 npm run build
 ```
+
+With Chrome 153+, Node 24.11+, FFmpeg, and ffprobe installed, run the browser
+integration check:
+
+```sh
+CHROME_CAPTURE_SMOKE=1 FFMPEG_PATH=ffmpeg node --test test/native-integration.test.mjs
+```
+
+It checks clicks, typing, dragging, PNG output, H.264 encoding, full video duration,
+and the publisher's file-size limit. CI runs this check on Ubuntu.
 
 Commit `dist/` after changing action scripts. CI verifies that bundled files
 match the sources and builds the complete shadcn demo.
