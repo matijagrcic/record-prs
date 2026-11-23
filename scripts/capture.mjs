@@ -6,15 +6,22 @@ import { identity, prefix, selectJourneys } from './lib.mjs';
 import { patchChromeSource } from './webreel-compat.mjs';
 import { expandJourneySteps, selectPullRequestJourneys } from './journeys.mjs';
 import { captureEngine, installNativeEngine } from './capture-engine.mjs';
+import { azureCaptureContext, checkoutAzureHead, stageAzureMedia } from './azure-capture.mjs';
 import { fileURLToPath } from 'node:url';
 
 const get = (name, fallback = '') => process.env[`INPUT_${name.toUpperCase().replaceAll('-', '_')}`] || fallback;
-const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-const out = path.join(process.env.RUNNER_TEMP || workspace, 'record-prs', process.env.GITHUB_RUN_ID || 'local', process.env.GITHUB_RUN_ATTEMPT || '1');
+const azure = process.argv.includes('--azure-pipelines') ? azureCaptureContext() : undefined;
+const workspace = azure?.workspace || process.env.GITHUB_WORKSPACE || process.cwd();
+const temp = azure?.temp || process.env.RUNNER_TEMP;
+const runId = azure?.runId || process.env.GITHUB_RUN_ID || 'local';
+const attempt = azure?.attempt || process.env.GITHUB_RUN_ATTEMPT || '1';
 const root = path.resolve(workspace, get('working-directory', '.'));
-const id = identity(JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')), process.env.GITHUB_RUN_ATTEMPT || '1');
+const event = azure?.event || JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+const id = identity(event, attempt);
+const baseSha = event.pull_request.base.sha;
+const out = path.join(temp || workspace, 'record-prs', runId, String(id.attempt));
 fs.mkdirSync(out, { recursive: true });
-core.setOutput('media-directory', out);
+if (!azure) core.setOutput('media-directory', out);
 const state = { ...id, skipped: false, journeys: [], success: false };
 const markerPath = path.join(out, `${prefix(id)}-marker.json`);
 const writeMarker = () => fs.writeFileSync(markerPath, JSON.stringify(state));
@@ -35,36 +42,43 @@ const shell = text => command('bash', ['-eo', 'pipefail', '-c', text]);
 let server;
 let log;
 try {
+  if (azure) checkoutAzureHead(workspace, id.sha);
   const engine = captureEngine(get('capture-engine', 'webreel'));
   const configPath = path.resolve(root, get('config', 'webreel.config.json'));
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   if (!config.videos || typeof config.videos !== 'object' || Array.isArray(config.videos)) throw new Error('Webreel config must define a videos object.');
   const mapPath = get('journey-map');
-  const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   let selected;
   if (mapPath) {
     const mapping = JSON.parse(fs.readFileSync(path.resolve(root, mapPath), 'utf8'));
-    const diff = spawnSync('git', ['diff', '--name-only', '-z', `${event.pull_request.base.sha}...${id.sha}`], {cwd: workspace, encoding:'utf8'});
+    const diff = spawnSync('git', ['diff', '--name-only', '-z', `${baseSha}...${id.sha}`], {cwd: workspace, encoding:'utf8'});
     if (diff.status !== 0) throw new Error('Could not read the PR diff. Use fetch-depth: 0.');
     selected = selectJourneys(config.videos, mapping, diff.stdout.split('\0').filter(Boolean));
   } else {
-    selected = selectPullRequestJourneys(config, configPath, workspace, event.pull_request.base.sha, id.sha);
+    selected = selectPullRequestJourneys(config, configPath, workspace, baseSha, id.sha);
   }
   state.journeys = selected;
   if (!selected.length) {
     state.skipped = true;
     state.success = true;
-    core.notice('No journeys selected for this PR.');
+    const notice = azure ? console.info : core.notice;
+    notice('No journeys selected for this PR.');
   } else {
     if (selected.length > 8) throw new Error('At most 8 journeys can be recorded per run.');
-    await shell(get('install-command', 'npm ci'));
+    await shell(get('install-command', azure ? 'bun install --frozen-lockfile' : 'npm ci'));
     const native = engine === 'chrome-capture';
     if (native) {
       const [major, minor] = process.versions.node.split('.').map(Number);
       if (major < 24 || (major === 24 && minor < 11)) throw new Error('chrome-capture requires Node 24.11+.');
     }
-    const toolDir = path.join(process.env.RUNNER_TEMP || out, `record-prs-webreel-0.1.4${native ? '-chrome-capture-0.1.2' : ''}`);
-    await command('npm', ['install', '--prefix', toolDir, '--no-audit', '--no-fund', 'webreel@0.1.4', ...(native ? ['chrome-capture@0.1.2'] : [])], workspace);
+    const toolDir = path.join(azure ? out : temp || out, `record-prs-webreel-0.1.4${native ? '-chrome-capture-0.1.2' : ''}`);
+    const packages = ['webreel@0.1.4', ...(native ? ['chrome-capture@0.1.2'] : [])];
+    if (azure) {
+      fs.mkdirSync(toolDir, { recursive: true });
+      await command('bun', ['add', '--exact', '--linker', 'hoisted', ...packages], toolDir);
+    } else {
+      await command('npm', ['install', '--prefix', toolDir, '--no-audit', '--no-fund', ...packages], workspace);
+    }
     if (native) {
       installNativeEngine(toolDir, fileURLToPath(new URL('./native-recorder.mjs', import.meta.url)));
       core.info('Recording with chrome-capture 0.1.2 and Webreel overlays (Chrome 153+ required).');
@@ -81,7 +95,8 @@ try {
     if (start) {
       log = fs.openSync(path.join(out, 'app.log'), 'w');
       server = spawn('bash', ['-eo', 'pipefail', '-c', start], {cwd: root, env, detached:true, stdio:['ignore',log,log]});
-      server.on('error', error => core.warning(error.message));
+      const warn = azure ? console.warn : core.warning;
+      server.on('error', error => warn(error.message));
     }
     const deadline = Date.now() + Number(get('ready-timeout', '90')) * 1000;
     let ready = false;
@@ -108,10 +123,16 @@ try {
     for (const name of selected) {
       if (!fs.existsSync(path.join(out, `${prefix(id)}-${name}.mp4`))) throw new Error(`Journey ${name} produced no video.`);
     }
+    if (azure) stageAzureMedia(out, azure.staging);
     state.success = true;
   }
 } catch (error) {
-  core.setFailed(error.message);
+  if (azure) {
+    console.error(error.message);
+    process.exitCode = 1;
+  } else {
+    core.setFailed(error.message);
+  }
   if (fs.existsSync(path.join(out, 'app.log'))) core.info(fs.readFileSync(path.join(out, 'app.log'), 'utf8').slice(-16000));
 } finally {
   writeMarker();

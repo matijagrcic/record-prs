@@ -1,14 +1,17 @@
 # record-prs
 
-Record your pull requests as MP4 browser walkthroughs and PNG screenshots. A
-trusted publisher keeps one comment up to date and applies `proof: 🎥 video`
-and `proof: 📸 screenshot` labels for valid captures of the current PR head.
+Record your pull requests as MP4 browser walkthroughs and PNG screenshots on
+GitHub Actions or Azure Pipelines. On GitHub Actions, a trusted publisher keeps
+one comment up to date and applies `proof: 🎥 video` and `proof: 📸 screenshot`
+labels for valid captures of the current PR head.
 
 Built on [Vercel Labs Webreel](https://github.com/vercel-labs/webreel). No AI API
 key is needed. Webreel follows your configured journey; it does not infer a new
 feature's interactions from arbitrary source-code changes.
 
 ## Install in another repository
+
+### GitHub Actions
 
 1. Copy [examples/record-prs.yml](examples/record-prs.yml) to
    `.github/workflows/record-prs.yml`.
@@ -26,7 +29,7 @@ feature's interactions from arbitrary source-code changes.
 jobs:
   record:
     if: '!github.event.pull_request.draft'
-    uses: matijagrcic/record-prs/.github/workflows/capture.yml@v1.2.0
+    uses: matijagrcic/record-prs/.github/workflows/capture.yml@v1.3.0
     with:
       install-command: npm ci
       start-command: npm run dev -- --host 127.0.0.1
@@ -36,7 +39,7 @@ jobs:
 That is the whole capture job. The reusable workflow sets up Node 24 and Bun,
 checks out the exact PR head with read-only permissions, starts the application,
 runs the matching journeys, and uploads each video/screenshot directly without
-a ZIP wrapper. The action also works as `uses: matijagrcic/record-prs@v1.2.0` inside
+a ZIP wrapper. The action also works as `uses: matijagrcic/record-prs@v1.3.0` inside
 your own job; set up Node 24 and check out the PR first.
 
 For Bun use `install-command: bun install --frozen-lockfile`. For pnpm, enable
@@ -44,6 +47,34 @@ Corepack in the install command and use a frozen install. For a monorepo, set
 `working-directory: apps/web`; config paths are relative to that directory.
 Leave `start-command: ''` and provide a ready preview URL to record an existing
 deployment instead of starting the app on the runner.
+
+### Azure Pipelines
+
+Use [azure-pipelines.yml](azure-pipelines.yml) on Azure DevOps Services. The
+defaults record the demo in this repository. For another repository, copy the
+file and set `recordPrsRevision` to the full commit SHA of a `record-prs`
+revision that includes Azure support. Set `workingDirectory`, `installCommand`,
+`startCommand`, `baseUrl`, and `config` for your app. Use the same
+[Webreel config](examples/webreel.config.json) as on GitHub Actions.
+
+- **Azure Repos**. Create the pipeline from the YAML file and add it as an
+  automatic [Build Validation policy](https://learn.microsoft.com/en-us/azure/devops/repos/git/branch-policies#build-validation)
+  on the target branch.
+- **GitHub repository with Azure Pipelines**. Connect the GitHub repository to
+  the pipeline and replace `pr: none` with a [YAML PR trigger](https://learn.microsoft.com/en-us/azure/devops/pipelines/yaml-schema/pr).
+  Set your target branch in the filter:
+
+  ```yaml
+  pr:
+    branches:
+      include: [main]
+    drafts: false
+  ```
+
+The job records the exact source commit from the queued PR merge and publishes
+the MP4s and PNGs under **Artifacts** on the pipeline run. GitHub Actions runs
+also support PR comments, proof labels, and inline attachments. Use synthetic
+app data and keep secrets out of the Azure capture pipeline.
 
 ## Select journeys for a PR
 
@@ -55,8 +86,8 @@ not select unchanged journeys. Deleted journeys do not run.
 
 Have the agent create or update a journey in the same PR as the UI change. One
 changed journey records one video; several record several. If no journeys
-change, capture skips application installation and recording. The publisher
-updates the PR comment and removes stale proof labels.
+change, capture skips application installation and recording. On GitHub Actions,
+the publisher updates the PR comment and removes stale proof labels.
 
 Webreel needs the journey's URL, selectors, and browser steps. A file named
 `journeys.json` with source-file patterns is a record-prs option, not a Webreel
@@ -67,7 +98,8 @@ When upgrading from `v1.0.5`, add or update a journey in the same PR as each
 frontend change. Release `v1.0.5` records every configured journey when no map
 is supplied; `v1.1.0` records only new or updated journeys by default. Custom
 capture jobs must check out the PR with `fetch-depth: 0`; missing comparison
-history fails capture. The reusable capture workflow includes this setting.
+history fails capture. The reusable GitHub workflow and the Azure pipeline both
+fetch the full history.
 The demo workflow uses the action from its checkout to test the current source.
 
 For compatibility, an explicit `journey-map` still overrides this default and
@@ -115,7 +147,7 @@ Artifacts require GitHub sign-in and expire after 14 days by default.
 8. Use the example publisher workflow, which already passes the secret:
 
 ```yaml
-- uses: matijagrcic/record-prs/publish@v1.2.0
+- uses: matijagrcic/record-prs/publish@v1.3.0
   with:
     github-token: ${{ github.token }}
     media-token: ${{ secrets.PR_MEDIA_TOKEN }}
@@ -200,7 +232,7 @@ reusable capture workflow. Webreel remains the default engine.
   with:
     node-version: '24' # 24.11+ for chrome-capture
 # Check out the PR and set up the application's package manager before this step.
-- uses: matijagrcic/record-prs@v1.2.0
+- uses: matijagrcic/record-prs@v1.3.0
   with:
     capture-engine: chrome-capture
     install-command: npm ci

@@ -1,0 +1,87 @@
+trigger: none
+# Azure Repos starts this pipeline through the target branch's Build Validation policy.
+pr: none
+
+parameters:
+  - name: recordPrsRevision
+    type: string
+    default: self
+  - name: workingDirectory
+    type: string
+    default: demo
+  - name: installCommand
+    type: string
+    default: bun install --frozen-lockfile && bun run build
+  - name: startCommand
+    type: string
+    default: bun run preview --host 127.0.0.1 --port 3000
+  - name: baseUrl
+    type: string
+    default: http://127.0.0.1:3000
+  - name: config
+    type: string
+    default: webreel.config.json
+  - name: captureEngine
+    type: string
+    default: webreel
+    values:
+      - webreel
+      - chrome-capture
+
+pool:
+  vmImage: ubuntu-24.04
+
+jobs:
+  - job: RecordPullRequest
+    condition: eq(variables['Build.Reason'], 'PullRequest')
+    timeoutInMinutes: 20
+    steps:
+      - checkout: self
+        fetchDepth: 0
+        persistCredentials: false
+
+      - task: UseNode@1
+        inputs:
+          version: '24.x'
+
+      - bash: |
+          set -euo pipefail
+          curl -fsSL https://bun.com/install | bash -s -- bun-v1.4.2
+          export PATH="$BUN_INSTALL/bin:$PATH"
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+          export FFMPEG_PATH="$(command -v ffmpeg)"
+
+          tools="$(mktemp -d "$AGENT_TEMPDIRECTORY/record-prs-tool.XXXXXX")"
+          trap 'rm -rf -- "$tools"' EXIT
+          if [[ "$RECORD_PRS_REVISION" != self ]]; then
+            if [[ ! "$RECORD_PRS_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+              echo 'recordPrsRevision must be a full record-prs commit SHA.' >&2
+              exit 1
+            fi
+            git -C "$tools" init --quiet
+            git -C "$tools" fetch --quiet --depth=1 --no-tags https://github.com/matijagrcic/record-prs.git "$RECORD_PRS_REVISION"
+            git -C "$tools" checkout --quiet --detach FETCH_HEAD
+          else
+            mkdir "$tools/dist"
+            cp dist/capture.mjs dist/native-recorder.mjs "$tools/dist/"
+          fi
+          node "$tools/dist/capture.mjs" --azure-pipelines
+        displayName: Record changed Webreel journeys
+        workingDirectory: $(Build.SourcesDirectory)
+        env:
+          BUN_INSTALL: $(Agent.TempDirectory)/record-prs-bun
+          RECORD_PRS_REVISION: ${{ parameters.recordPrsRevision }}
+          INPUT_WORKING_DIRECTORY: ${{ parameters.workingDirectory }}
+          INPUT_INSTALL_COMMAND: ${{ parameters.installCommand }}
+          INPUT_START_COMMAND: ${{ parameters.startCommand }}
+          INPUT_BASE_URL: ${{ parameters.baseUrl }}
+          INPUT_CONFIG: ${{ parameters.config }}
+          INPUT_CAPTURE_ENGINE: ${{ parameters.captureEngine }}
+
+      - publish: $(Build.ArtifactStagingDirectory)/record-prs
+        artifact: record-prs-$(System.StageAttempt)-$(System.JobAttempt)
+        displayName: Publish recordings
+        condition: and(succeeded(), eq(variables['recordPrsHasMedia'], 'true'))
